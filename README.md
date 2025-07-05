@@ -4,4 +4,4 @@ Juliet Thistleton's final project for DS241 where she worked wtih three other st
 
 In the "analysis" folder, each file represents the work each person contirbuted to the project. Juliet Thistleton contributed the bikeshare_visualization files. 
 
-Our final explainations and recommendations are in Final_Report. 
+Our final explanations and recommendations are in Final_Report. 
