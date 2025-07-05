@@ -1,0 +1,397 @@
+---
+title: "Final Report"
+Author: "Juliet Thistleton, Jesse Dykes, Jason Ofosu-Mensah, Yadhira Garcia"
+output: html_notebook
+---
+
+# Introduction
+
+In this report, we came up with suggestions on where to place Bike Share stations to increase riderships based on many variables, such as the location of the current bike share stations, the placement of signed bike routes, and the locations where people take vehicles as their main mode of transportation versus take public transportaition as their main mode of transportation. 
+
+## Load Appropriate Packages
+
+```{r}
+library(knitr)
+library(tidyverse)
+library(janitor)
+library(here) 
+library(sf) 
+library(tmap)
+library(tidycensus)
+library(sp)
+library(leaflet)
+library(magrittr)
+```
+Knitr is used for properly transforming the r notebook into an html file.
+The tidyverse is used to tidy data using other packages within in such as dplyr.
+The janitor packages is used to clean up the variable names from the data sets.
+The here library is used to locate files on the computer to make it easier to load in the data sets.
+The sf library is used to work with spatial data.
+The tmap library is used to create interaactive maps.
+The tidycensus data is used to get data from the U.S Census Bureau data via codes. 
+The sp library allows for the use of CRS to convert degree measurements into meters.
+The leaflet library allows an interactive map for panning and zooming as well as creating map tiles and popups.
+The magrittr library allows the usage of certain pipes such as %>% 
+
+## Read in the captial bike share data
+
+```{r}
+bikes = (read.csv(here("data_raw", "202309-capitalbikeshare-tripdata.csv"))) |> clean_names()
+```
+
+# Read in the Captial Bikeshare Station Locations
+
+```{r}
+racks = st_read((here("data_raw", "Capital_Bikeshare_Locations.geojson"))) |> clean_names() 
+```
+ 
+## Api Key to access the census data
+```{r}
+census_api_key("9fc5d3792d3a5e922287c3f4e9995118766d50a2")
+
+```
+
+## Loading in the codes that is linked to access the specific census data 
+```{r}
+v2018 = load_variables(2018, "acs5")
+```
+
+## Load the relevant data from the 2017-2021 Census Data for Washington DC
+
+```{r}
+df_censcus=get_acs(geography = "tract",
+                  variables=c("vehicles"="B08141_001",
+                              "population" = "B01001_001",
+                               "public_transportion" = "B08006_008"),
+                  state="DC",geometry=TRUE,year=2021) 
+```
+For this analysis, we will need the amount of vehiclces used in a specific location in Washington D.c., the population for each area in Washington D.C., and the usage of public transportation in those same areas. 
+
+## Make sure our data frames plot
+
+```{r}
+plot(df_censcus)
+plot(racks)
+```
+
+## Make each observation of vehicles, population, and public transportation into their own columns
+
+```{r}
+
+tmap_mode("view")
+
+df_cens=df_censcus %>% 
+  select(-moe) %>% 
+  pivot_wider(names_from = "variable", 
+              values_from = "estimate")|> 
+  mutate(pub_pop = public_transportion / population,
+         v_pop = vehicles / population)
+
+```
+
+
+## Read the Signed Bike Routes data into a spatial data frame. 
+```{r}
+bike_routes = st_read((here("data_raw", "Signed_Bike_Routes.geojson"))) |> clean_names() 
+```
+
+## Plot data
+```{r}
+df_cens_adj = df_cens |> st_transform(4326)
+bike_routes = st_as_sf(bike_routes, crs=st_crs(df_cens_adj))
+
+racks = st_as_sf(racks, crs=st_crs(df_cens_adj))
+tm_shape(df_cens) +tm_polygons(c("pub_pop", "v_pop"), alpha=.5) + tm_shape(racks) +tm_symbols(size = 0.1, alpha = 0.5) +   
+tm_shape(bike_routes) + tm_lines(col="blue",lwd=1,alpha= 1)
+```
+
+Here, we see two maps of Washington D.C. The map on the right shows the population proportion of 
+people who use public transportation (excluding taxi-cabs), and on the right we see a the 
+population proportion of people who own vehicles. The assumption is that they use these vehicles 
+as the primary method to commute to work, school, or other transportation needs. On both of the 
+maps, the blue lines represent signed bike routes routes. The assumption is that the primary 
+target areas to put more bike share stations should be where the bikes would be the most 
+accessible to ride on. Signed bike routes mean that those areas are most likely the more safe 
+areas to ride bikes in, and the area around would be most accommodating to bike riders. The 
+circles on each map represents the current bike share locations. 
+__________________________________________________________________________________________________________________________________
+To create an interactive map of biking traffic routes in Washington D.C. is as follows (after opening up relevant files from above):
+
+```{r}
+#Since there are start and end time for latitude and longitude, condensing this information into a total makes it easier to visualize
+data = 
+  mutate(data,
+      lat_total = end_lat - start_lat,
+      lng_total = end_lng - start_lng
+  )
+```
+
+```{r}
+# Creating a new data frame with station names and their traffic counts
+#
+station_traffic <- data %>%
+  group_by(station = start_station_name) %>%
+  summarise(traffic = n()) %>%
+  arrange(desc(traffic))
+```
+
+
+```{r}
+#Filtering out any N/A 
+station_locations <- data %>%
+  distinct(start_station_name, lat_total, lng_total) %>%
+  filter(!is.na(lat_total) & !is.na(lng_total & !is.na(start_station_name)))
+```
+
+```{r}
+names(station_locations)[names(station_locations) == "start_station_name"] <- "station"
+# Merge traffic information with station locations
+station_data = merge.data.frame(station_locations,station_traffic, by = "station", all = TRUE)
+```
+
+```{r}
+# Creating an interactive map to show all traffic routes
+bike_map <- leaflet(data = station_data) %>%
+  addTiles() %>%
+  setView(lng = -77.0369, lat = 38.9072, zoom = 10)
+
+print(bike_map)
+```
+
+In addition to mapped capital bike share station data, we can see the paths that people travel
+along to get to various different shopping centers, schools, etc. around the area. Newer facilities
+may have been built around these station hot-spots and along the bike/walk route to garner foot
+traffic which increase commerce for the city. By understanding the flow of traffic and destinations, 
+we can interpret much about social migration for these populations. Perhaps their destinations for free-
+periods (such as restaurants, cafes,etc) are also influenced by what is available or within distance from 
+their last train stop or closest to the next one they aim to go on. Not only in making the ground
+transportation (walking/biking) a more pleasant experience (especially for students in these areas), 
+but these routes also serve to inform and bring business to local shops that engage the community. 
+_________________________________________________________________________________________________
+
+# Load DC location data
+
+Load in files from locations of interest:
+  Shopping centers
+  Public schools
+  Independent schools
+
+```{r}
+dfShops = st_read(here("data_raw","Shopping_Centers.geojson")) |> clean_names()
+pub_schools = st_read(here("data_raw", "DC_Public_Schools.geojson")) |> clean_names()
+ind_schools = st_read(here("data_raw", "Independent_Schools.geojson")) |> clean_names()
+```
+
+# Simplify shops and schools dataframes
+
+```{r}
+shops = dfShops |> select(geometry,name)
+p_sch = pub_schools |> select(geometry,name)
+i_sch = ind_schools |> select(geometry,name)
+```
+
+
+# Find the distance deltas
+
+Use CRS to convert global degrees into meter measurements
+Find the distance between each location of shops and schools and 
+each bikeshare station
+
+```{r}
+crs <- CRS("+init=epsg:4326")
+
+s_rack_d = st_distance(racks,shops)
+isch_rack_d = st_distance(racks,i_sch)
+psch_rack_d = st_distance(racks,p_sch)
+
+```
+
+# Find shop minimums
+
+Filter the distances for the minimum value and append the corresponding shop
+names to the values
+Define the dataframe's type as 'shops'
+
+```{r}
+s_n = shops |> 
+  st_drop_geometry() |> 
+  mutate(type = "shops")
+min_dist = colMins(s_rack_d)
+srd_mins = cbind.data.frame(s_n,min_dist)
+```
+
+# Find public school minimums
+
+Filter the distances for the minimum value and append the corresponding school
+names to the values
+Define the dataframe's type as 'public'
+
+```{r}
+p_n = p_sch |> 
+  st_drop_geometry() |> 
+  mutate(type = "public")
+min_dist = colMins(psch_rack_d)
+prd_mins = cbind.data.frame(p_n,min_dist)
+```
+
+# Find independent school minimums
+
+Filter the distances for the minimum value and append the corresponding school
+names to the values
+Define the dataframe's type as 'independent'
+
+```{r}
+i_n = i_sch |> 
+  st_drop_geometry() |> 
+  mutate(type = "independent")
+min_dist = colMins(isch_rack_d)
+ird_mins = cbind.data.frame(i_n,min_dist)
+```
+
+# Combine dataframes
+
+Combine all the dataframes into 'allmins'
+
+Combine the school dataframes into 'schoolmins'
+
+```{r}
+allmins = rbind(srd_mins,ird_mins,prd_mins)
+
+schoolmins = rbind(ird_mins,prd_mins)
+```
+
+# Plot
+
+Plot the various dataframes as histograms to show the relative distances each type 
+of location is from the nearest bikeshare station
+
+Plot all and color by type
+
+```{r}
+allmins |> ggplot(aes(x=min_dist, fill = type)) + geom_histogram(binwidth = 50) + ggtitle("All locations") + xlab("Meters from Nearest Bikestation") + theme_dark()
+```
+
+Plot schools and color by type
+
+```{r}
+schoolmins |> ggplot(aes(x=min_dist, fill = type)) + geom_histogram(binwidth = 50) + ggtitle("All schools") +
+  xlab("Meters from Nearest Bikestation") + theme_dark()
+```
+
+Plot the individual location dataframes and color similarly to the 'allmins' plot
+
+```{r}
+srd_mins |> ggplot(aes(x=min_dist)) + geom_histogram(binwidth = 50, color = "skyblue") + ggtitle("Shops") + ylim(0,25) +
+  xlab("Meters from Nearest Bikestation") + theme_dark()
+
+prd_mins |> ggplot(aes(x=min_dist)) + geom_histogram(binwidth = 50, color = "green") + ggtitle("Public Schools") + ylim(0,25) +
+  xlab("Meters from Nearest Bikestation") + theme_dark()
+
+ird_mins |> ggplot(aes(x=min_dist)) + geom_histogram(binwidth = 50, color = "tomato") + 
+  ggtitle("Independent Schools") + xlab("Meters from Nearest Bikestation") + ylim(0,25) + 
+  theme_dark()
+```
+
+The histograms above show the relative distance of different notable types of locations to the
+nearest bikeshare station. The distance is measured in meters. The locations were chosen as
+possibly overlooked impacts/untapped potential for greater ridership. Science Daily also reported
+that a decrease in the distance that people need to travel to access bikeshare stations could 
+potentially increase ridership by a significant amount. Combining these two ideas, placing bike 
+stations closer to these locations could boost ridership greatly. People who need to go to the 
+store to quickly grab an item or 2 and kids that can't rely on their parents for timely pickups 
+would be the desired impact groups, though other situations may impact someone's usage of the 
+bikeshare system closer to schools and stores.
+
+_________________________________________________________________________________________________
+
+
+# we read in the needed data based on the D.C capital bikeshare program,the museums in the D.C area, parks and recreational facilities in the D.C area, and bike racs near the recreational areas. We then view them
+```{r}
+bykes = (read.csv(here("data_raw","202309-capitalbikeshare-tripdata.csv"))) |> clean_names() 
+
+Parks_N_Recs <- st_read(here("data_raw","Parks_and_Recreation_Areas.geojson")) |> clean_names()
+
+Museuems <- st_read(here("data_raw","Museums.geojson")) |> clean_names()
+
+bracks <- st_read(here("data_raw","Public_Bike_Racks.geojson")) |> clean_names()
+
+
+view(Parks_N_Recs)
+view(Museuems)
+view(bracks)
+
+```
+# limit the number of sample size to 100
+```{r}
+
+bykes_sliced <- bykes|> slice_sample(n=100)
+view(bykes_sliced)
+```
+# read census api key, and view 2018 census variables
+```{r eval=FALSE, include=FALSE, install = TRUE}
+census_api_key("8adcbab0823170535252fcf4c508e9cf0bfd09dc")
+view(v2018)
+```
+# we want to access specific census data from 2018
+```{r}
+v2018 <- load_variables(2018,"acs5")
+```
+# We want to gain information from the census data based on the variables vehicles, population, and public_population
+```{r}
+df_census <- get_acs(geography = "tract",
+                    variables = c("vehicles"="B08141_001",
+  "population"="B01001_001",
+  "public_transportation" = "B08006_008"),
+  state ="DC",geometry = TRUE,year = 2021)
+```
+# Mini plots of census,parks n recs, mususems and bike racks data which we generate
+```{r}
+plot(df_census)
+plot(Parks_N_Recs)
+plot(Museuems)
+plot(bracks)
+```
+# we specefically look public transportation, and vehicle density within the D.C area
+```{r}
+tmap_mode("view")
+
+df_census_Pop = df_census %>%
+  select(-moe) %>%
+  pivot_wider(names_from = "variable",
+              values_from = "estimate")|>
+  mutate(pub_pop = public_transportation / population, v_pop = vehicles / population)
+
+
+```
+# We create the vizulation of the musemums,parks and recreational facilities in the D.C area, see the amount of bike racks near said locations, and see the vehicle, and public transporation density based on the population that use these modes of transport
+
+```{r}
+df_census_adjust = df_census |> st_transform(4326)
+Parks_N_Recs = st_as_sf(Parks_N_Recs,crs = st_crs(df_census_adjust))
+bracks = st_as_sf(bracks,crs=st_crs(df_census_adjust))
+museums = st_as_sf(Museuems,crs=st_crs(df_census_adjust))
+
+tm_shape(df_census_Pop) + tm_polygons(c("pub_pop","v_pop"),alpha = .5) + tm_shape(Parks_N_Recs)+
+tm_symbols(col = "green", size=0.08,alpha = 0.5) + tm_shape(museums)+ tm_symbols(col = "violet",
+  size=0.08,alpha = 0.5) + tm_shape(bracks)+ tm_dots(col = "red", size=0.004,alpha = 0.5)
+```
+We see in the map above that, the visualization made depicts areas where  recreation and parks in the D.C area exist in green orbs, museums in purple orbs, and the various bike rack locations in the entire D.C area in the form of red dots. 
+
+Though we can see a majority of bike rack around the D.C area, and mostly in the center area of D.C, which surround areas which have museums, recreation and park facilities. But we do see some patches within the map, where the population of people who tend to drive, and use public transportation, have slightly lesser amounts of bike racks near the Museums recreational and park facilities, which are near the outskirts of town, which was an odd site to see. 
+
+Based On this analysis, the perception given is that the ability to access some museum, recreation and park areas, can be quite difficult if one does not own a car, due to the lack of public transportation in said areas, this is where the DC bike share program make an entrance with a solution, I believe allocating more bike racks across museum, recreation and park facility areas,  could possibly be a positive reinforcement to get more people to ride bikes to and from such areas, which could in-return drive an increase in economic revenue growth, of the D.C government. 
+
+Another reason would be to promote, and draw awareness to healthy recreational bike rides within youth (and possibly the elderly), As according to an observational-study article dubbed "Cycling as a Part of Recreation: An Awareness-Exploring Study" recreational bike rides could lead to mental, and physical health benefits within society, but much work is needed to be done, and this starts with the allocation of an adequate amount bike racks within the various recreational and park areas, which lack them.
+_____________________________________________________________________________________________________
+
+
+## Data Sources:
+
+Capital Bike Share Bike Racks: https://opendata.dc.gov/datasets/a1f7acf65795451d89f0a38565a975b3_5/about
+Bike Share Data: https://capitalbikeshare.com/system-data
+Signed Bike Routes: https://opendata.dc.gov/explore?collection=Dataset&query=Bike%20Routes
+Science Daily Article: https://www.sciencedaily.com/releases/2015/03/150318144504.htm
+Museums: https://opendata.dc.gov/datasets/2e65fc16edc3481989d2cc17e6f8c533_54/explore?location=38.908237%2C-77.029335%2C13.31
+Parks and recreations:
+https://opendata.dc.gov/datasets/DCGIS::parks-and-recreation-areas/explore?location=38.898985%2C-76.948888%2C12.49
+Recreational Biking Article: Uca, M., Alizadehebadi, L. and Yılmaz, S.H. (2021) ‘Cycling as a part of recreation: An awareness-exploring study’, Journal of Educational Issues, 7(3), p. 265. doi:10.5296/jei.v7i3.19152
