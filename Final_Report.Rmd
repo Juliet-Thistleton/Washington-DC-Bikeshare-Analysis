@@ -47,7 +47,7 @@ racks = st_read((here("data_raw", "Capital_Bikeshare_Locations.geojson"))) |> cl
  
 ## Api Key to access the census data
 ```{r}
-#census_api_key("9fc5d3792d3a5e922287c3f4e9995118766d50a2")
+#census_api_key("XXX")
 
 ```
 
